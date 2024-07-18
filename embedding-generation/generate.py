@@ -14,6 +14,7 @@ model_name = os.environ["MODEL_NAME"]
 pdf_path = os.environ["PDF_PATH"]
 
 # load the documents
+print(f"Loading documents from {pdf_path}") # todo make this logger
 raw_documents = WikipediaLoader(query="Elizabeth I").load()
 # raw_documents = PyPDFLoader(pdf_path).load()
 
