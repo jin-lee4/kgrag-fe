@@ -1,0 +1,126 @@
+version: '3.8'
+
+services:
+  neo4j:
+    image: neo4j:5.11
+    ports:
+      - 7687:7687
+      - 7474:7474
+    volumes:
+      - $PWD/neo4j/data:/data
+    environment:
+      - NEO4J_AUTH=${NEO4J_USERNAME}/${NEO4J_PASSWORD}
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_db_tx__log_rotation_retention__policy=false
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider localhost:7474 || exit 1"]
+      interval: 15s
+      timeout: 30s
+      retries: 10
+    networks:
+      - net
+
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    #ports:
+    #  - 5432:5432
+    volumes:
+      - $PWD/postgres/data:/var/lib/postgresql/data
+      - $PWD/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - net
+
+  embedding-generation:
+    build:
+      context: ./embedding-generation
+      dockerfile: Dockerfile
+    volumes:
+      - $PWD/embedding-generation/data:/data
+    environment:
+      - NEO4J_URI=${NEO4J_URI}
+      - NEO4J_USERNAME=${NEO4J_USERNAME}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - PDF_PATH=${PDF_PATH}
+      - MODEL_NAME=${MODEL_NAME}
+    networks:
+      - net
+    depends_on:
+      neo4j:
+        condition: service_healthy
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    volumes:
+      - $PWD/api/uploads:/uploads
+    environment:
+      - MODEL_NAME=${MODEL_NAME}
+      - NEO4J_URI=${NEO4J_URI}
+      - NEO4J_USERNAME=${NEO4J_USERNAME}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_HOST=${POSTGRES_HOST}
+      - POSTGRES_PORT=${POSTGRES_PORT}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - LANGCHAIN_TRACING_V2=${LANGCHAIN_TRACING_V2-false} # default false
+      - LANGCHAIN_ENDPOINT=${LANGCHAIN_ENDPOINT}
+      - LANGCHAIN_PROJECT=${LANGCHAIN_PROJECT}
+      - LANGCHAIN_API_KEY=${LANGCHAIN_API_KEY}
+    networks:
+      - net
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      embedding-generation:
+        condition: service_completed_successfully
+    x-develop:
+      watch:
+        - action: rebuild
+          path: ./api
+    ports:
+      - 8504:8504
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 http://localhost:8504/ || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  front-end:
+    build:
+      context: ./front-end
+      dockerfile: Dockerfile
+    #x-develop:
+    #  watch:
+    #    - action: sync
+    #      path: ./front-end
+    #      target: /app
+    #      ignore:
+    #        - ./front-end/node_modules/
+    #    - action: rebuild
+    #      path: ./front-end/package.json
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - net
+    ports:
+      - 8505:8505
+
+networks:
+  net:
