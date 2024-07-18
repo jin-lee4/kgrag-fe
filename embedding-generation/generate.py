@@ -3,7 +3,7 @@ import os
 from langchain.text_splitter import TokenTextSplitter
 
 from langchain_community.embeddings import OpenAIEmbeddings
-from langchain_community.document_loaders import WikipediaLoader, PyPDFLoader
+from langchain_community.document_loaders import WikipediaLoader, PyPDFDirectoryLoader
 from langchain_community.graphs.neo4j_graph import Neo4jGraph
 
 from langchain_experimental.graph_transformers import LLMGraphTransformer
@@ -16,7 +16,7 @@ pdf_path = os.environ["PDF_PATH"]
 # load the documents
 print(f"Loading documents from {pdf_path}") # todo make this logger
 raw_documents = WikipediaLoader(query="Elizabeth I").load()
-# raw_documents = PyPDFLoader(pdf_path).load()
+# raw_documents = PyPDFDirectoryLoader(pdf_path).load()
 
 # chunk documents
 text_splitter = TokenTextSplitter(chunk_size=512, chunk_overlap=24)
