@@ -247,7 +247,6 @@ async def query(request: QueryRequest = Depends(), conn = Depends(get_pg_conn)):
 
   pdf_chain = embedding_manager.get_embeddings(pdf)
 
-  """
   if request.chat_history is None:
     response = chain.invoke({
       "question": request.question,
@@ -257,9 +256,8 @@ async def query(request: QueryRequest = Depends(), conn = Depends(get_pg_conn)):
       "question": request.question,
       "chat_history": request.chat_history,
     })
-  """
   
-  return {"response": pdf.handle}
+  return {"response": response}
 
 @app.post("/upload/")
 async def upload(file: UploadFile = File(...), conn = Depends(get_pg_conn)):

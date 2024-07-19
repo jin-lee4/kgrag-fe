@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   neo4j:
-    image: neo4j:5.11
+    image: neo4j:5.18
     ports:
       - 7687:7687
       - 7474:7474
@@ -30,7 +30,7 @@ services:
     #ports:
     #  - 5432:5432
     volumes:
-      - $PWD/postgres/data:/var/lib/postgresql/data
+      - $PWD/postgres/data/mount:/var/lib/postgresql/data/
       - $PWD/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} || exit 1"]

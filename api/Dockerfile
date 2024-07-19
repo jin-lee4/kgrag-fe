@@ -12,12 +12,6 @@ COPY requirements.txt .
 
 RUN pip install --upgrade -r requirements.txt
 
-# MIGRATE TO requirements.txt
-RUN pip install asyncpg
-RUN pip install lru-dict
-RUN pip install pypdf
-RUN pip install chromadb
-
 COPY api.py .
 COPY upload.py .
 COPY embedding.py .
