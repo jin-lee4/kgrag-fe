@@ -14,9 +14,12 @@ RUN pip install --upgrade -r requirements.txt
 
 # MIGRATE TO requirements.txt
 RUN pip install asyncpg
+RUN pip install lru-dict
 
 COPY api.py .
-COPY document.py .
+COPY upload.py .
+COPY embedding.py .
+COPY pdf.py .
 COPY database.py .
 
 HEALTHCHECK CMD curl --fail http://localhost:8504

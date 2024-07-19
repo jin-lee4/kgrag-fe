@@ -114,13 +114,13 @@ services:
     #        - ./front-end/node_modules/
     #    - action: rebuild
     #      path: ./front-end/package.json
-    depends_on:
-      api:
-        condition: service_healthy
+    #depends_on:
+    #  api:
+    #    condition: service_healthy
     networks:
       - net
     ports:
-      - 8505:8505
+      - 8505:3000
 
 networks:
   net:

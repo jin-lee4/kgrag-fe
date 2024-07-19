@@ -31,7 +31,10 @@ from fastapi import FastAPI, Depends, HTTPException, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import postgres_db, get_pg_conn
-from document import UploadManager
+
+from upload import UploadManager
+from embedding import EmbeddingManager
+from pdf import PDF, PDFStore
 
 model_name = os.environ["MODEL_NAME"]
 # remapping for langchain neo4j integration
@@ -235,6 +238,9 @@ async def query(request: QueryRequest = Depends(), conn = Depends(get_pg_conn)):
   except ValueError:
     raise HTTPException(status_code=400, detail="Invalid UUID")
 
+  pdf = await upload_manager.fetch(conn, query_uuid)
+
+  """
   if request.chat_history is None:
     response = chain.invoke({
       "question": request.question,
@@ -244,16 +250,26 @@ async def query(request: QueryRequest = Depends(), conn = Depends(get_pg_conn)):
       "question": request.question,
       "chat_history": request.chat_history,
     })
+  """
 
-  return {"response": response}
+  if pdf.handle is None:
+    raise HTTPException(status_code=400, detail="Invalid Handle")
+  
+  return {"response": pdf.handle}
 
 @app.post("/upload/")
 async def upload(file: UploadFile = File(...), conn = Depends(get_pg_conn)):
-  try:
-    file_record = await upload_manager.upload_file(conn, file)
-    return {"uuid": str(file_record['id']), "filename": file_record['filename']}
-  except Exception as e:
-    raise HTTPException(status_code=500, detail=str(e))
+  if file.content_type != "application/pdf":
+    raise HTTPException(status_code=400, detail="Invalid file type. Only PDF files are accepted.")
+
+  contents = file.file.read()
+  if len(contents) > 10 * 1024 * 1024:  # 10MB
+    raise HTTPException(status_code=400, detail="File size exceeds 10MB limit.")
+
+  pdf = PDF(uuid=uuid.uuid4(), name=file.filename)
+  uuid = await upload_manager.upload(conn, pdf, contents)
+
+  return {"uuid": uuid}
 
 @app.on_event("startup")
 async def on_startup():
