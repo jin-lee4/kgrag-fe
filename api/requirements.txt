@@ -16,3 +16,7 @@ langchain
 langchain-community 
 langchain-openai 
 langchain-experimental
+asyncpg
+lru-dict
+pypdf
+chromadb

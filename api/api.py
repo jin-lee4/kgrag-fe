@@ -208,6 +208,9 @@ logger = logging.getLogger(__name__)
 # configure file uploads, top-level dir of /uploads
 upload_manager = UploadManager(upload_dir="/uploads")
 
+# configure embedding management
+embedding_manager = EmbeddingManager()
+
 # configure app
 app = FastAPI(root_path="/api/v1")
 origins = ["*"]
@@ -239,6 +242,10 @@ async def query(request: QueryRequest = Depends(), conn = Depends(get_pg_conn)):
     raise HTTPException(status_code=400, detail="Invalid UUID")
 
   pdf = await upload_manager.fetch(conn, query_uuid)
+  if pdf.handle is None:
+    raise HTTPException(status_code=400, detail="Invalid PDF, please reupload")
+
+  pdf_chain = embedding_manager.get_embeddings(pdf)
 
   """
   if request.chat_history is None:
@@ -251,9 +258,6 @@ async def query(request: QueryRequest = Depends(), conn = Depends(get_pg_conn)):
       "chat_history": request.chat_history,
     })
   """
-
-  if pdf.handle is None:
-    raise HTTPException(status_code=400, detail="Invalid Handle")
   
   return {"response": pdf.handle}
 
@@ -266,10 +270,10 @@ async def upload(file: UploadFile = File(...), conn = Depends(get_pg_conn)):
   if len(contents) > 10 * 1024 * 1024:  # 10MB
     raise HTTPException(status_code=400, detail="File size exceeds 10MB limit.")
 
-  pdf = PDF(uuid=uuid.uuid4(), name=file.filename)
-  uuid = await upload_manager.upload(conn, pdf, contents)
+  pdf = PDF(uuid.uuid4(), file.filename)
+  response = await upload_manager.upload(conn, pdf, contents)
 
-  return {"uuid": uuid}
+  return {"uuid": response}
 
 @app.on_event("startup")
 async def on_startup():

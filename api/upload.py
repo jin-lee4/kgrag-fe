@@ -1,10 +1,10 @@
-# upload.py
-
 import os
 import uuid
 import asyncpg
+
 from fastapi import HTTPException
-from pdf import PDF, load_pdf_from_path
+
+from pdf import PDF
 
 def save_file(upload_dir: str, pdf: PDF, pdf_binary_data: bytes) -> str:
   new_filename = f"{pdf.uuid}_{os.path.splitext(pdf.name)[0]}.pdf"
@@ -34,8 +34,8 @@ class UploadManager:
 
   async def fetch(self, conn, pdf_uuid: uuid.UUID) -> PDF:
     async with conn.transaction():
-      row = await conn.fetchrow('SELECT * FROM uploaded_pdfs WHERE uuid = $1', pdf_uuid)
+      row = await conn.fetchrow('SELECT * FROM uploaded_pdfs WHERE id = $1', pdf_uuid)
       if not row:
         raise HTTPException(status_code=404, detail="PDF not found")
-      pdf = PDF(uuid=row['uuid'], name=row['name'], handle=row['handle'])
+      pdf = PDF(uuid=row['id'], name=row['filename'], handle=row['file_handle'])
       return pdf
