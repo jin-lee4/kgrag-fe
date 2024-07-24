@@ -5,7 +5,9 @@ import logging
 
 from typing import Tuple, List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from langchain.agents import initialize_agent, AgentType
 
 from langchain_core.runnables import (
   RunnableBranch,
@@ -13,6 +15,7 @@ from langchain_core.runnables import (
   RunnableParallel,
   RunnablePassthrough,
 )
+from langchain_core.tools import Tool
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.prompts.prompt import PromptTemplate
 from langchain_core.pydantic_v1 import BaseModel, Field
@@ -31,7 +34,6 @@ from fastapi import FastAPI, Depends, HTTPException, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import postgres_db, get_pg_conn
-
 from upload import UploadManager
 from embedding import EmbeddingManager
 from pdf import PDF, PDFStore
@@ -227,11 +229,25 @@ app.add_middleware(
 async def root():
   return {"message": "Hello World"}
 
+class DocumentInput(BaseModel):
+  question: str = Field()
+
 class QueryRequest(BaseModel):
   uuid: str
   question: str
   chat_history: Optional[List[Tuple[str, str]]] = None
 
+"""
+if request.chat_history is None:
+  response = chain.invoke({
+    "question": request.question,
+  })
+else:
+  response = chain.invoke({
+    "question": request.question,
+    "chat_history": request.chat_history,
+  })
+"""
 @app.get("/query/")
 async def query(request: QueryRequest = Depends(), conn = Depends(get_pg_conn)):
   logger.info(f"Received request: {request.json()}")
@@ -245,18 +261,56 @@ async def query(request: QueryRequest = Depends(), conn = Depends(get_pg_conn)):
   if pdf.handle is None:
     raise HTTPException(status_code=400, detail="Invalid PDF, please reupload")
 
-  pdf_chain = embedding_manager.get_embeddings(pdf)
+  pdf_store = await embedding_manager.get_embeddings(pdf)
+
+  pdf_prompt = PromptTemplate.from_template(
+    r"""
+      You are an assistant here to inspect uploaded documents and return information based on the
+      given question and context:
+      Question: {question}
+      Context: {context} 
+    """
+  )
+
+  def get_context(input_obj):
+    question = input_obj["question"]
+    context_docs = pdf_store.embeddings.invoke(question)
+    context = "\n\n".join(doc.page_content for doc in context_docs)
+    return {"question": question, "context": context}
+
+  pdf_chain = (
+    RunnableLambda(get_context)
+    | pdf_prompt
+    | llm
+    | StrOutputParser()
+  )
+
+  comparison_prompt = ChatPromptTemplate.from_template(
+    """
+    You will be given a question and outputs from two different sources.
+    Question: {question}
+    Knowledge Base Source: {base_output}
+    Uploaded Document Source: {doc_output}
+    Compare and contrast the relevant information from both output sources in relation to the question.
+    """
+  )
+
+  final_chain = (
+    RunnableParallel(base_output=chain, doc_output=pdf_chain, question=RunnableLambda(lambda x: x["question"]))
+    | comparison_prompt
+    | llm
+    | StrOutputParser()
+  )
 
   if request.chat_history is None:
-    response = chain.invoke({
-      "question": request.question,
-    })
+    chain_input = {"question": request.question}
   else:
-    response = chain.invoke({
-      "question": request.question,
-      "chat_history": request.chat_history,
-    })
+    chain_input = {"question": request.question, "chat_history": request.chat_history}
+
+  repsonse = await final_chain.ainvoke(chain_input)
   
+  print(response)
+
   return {"response": response}
 
 @app.post("/upload/")

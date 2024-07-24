@@ -1,15 +1,10 @@
 openai
-python-dotenv
-wikipedia
-tiktoken
 neo4j
-Pillow
 fastapi
 PyPDF2
 torch==2.0.1
 pydantic
 uvicorn
-sse-starlette
 boto3
 # missing from the langchain base image?
 langchain 

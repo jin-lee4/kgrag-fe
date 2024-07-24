@@ -12,11 +12,11 @@ COPY requirements.txt .
 
 RUN pip install --upgrade -r requirements.txt
 
-COPY api.py .
-COPY upload.py .
-COPY embedding.py .
-COPY pdf.py .
-COPY database.py .
+COPY src/api.py .
+COPY src/upload.py .
+COPY src/embedding.py .
+COPY src/pdf.py .
+COPY src/database.py .
 
 HEALTHCHECK CMD curl --fail http://localhost:8504
 

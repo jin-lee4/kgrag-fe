@@ -20,15 +20,15 @@ class PDF:
     self.name = name
     self.handle = handle
 
-  def generate_embeddings(self):
-    raw_documents = PyPDFLoader(self.handle).load()
+  async def generate_embeddings(self):
+    raw_documents = await PyPDFLoader(self.handle).aload()
 
     # chunk and split
     text_splitter = TokenTextSplitter(chunk_size=512, chunk_overlap=24)
     documents = text_splitter.split_documents(raw_documents)
 
     # generate in memory representation
-    chroma = Chroma.from_documents(
+    chroma = await Chroma.afrom_documents(
       documents,
       OpenAIEmbeddings(),
     )
