@@ -7,7 +7,8 @@ from typing import Tuple, List, Optional
 
 from pydantic import BaseModel, Field
 
-from langchain.agents import initialize_agent, AgentType
+from langchain.chains import RetrievalQA
+from langchain.agents import AgentExecutor, create_openai_tools_agent
 
 from langchain_core.runnables import (
   RunnableBranch,
@@ -16,7 +17,7 @@ from langchain_core.runnables import (
   RunnablePassthrough,
 )
 from langchain_core.tools import Tool
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.prompts.prompt import PromptTemplate
 from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_core.messages import AIMessage, HumanMessage
@@ -134,7 +135,7 @@ def retriever(question: str):
   final_data = f"""Structured data:
 {structured_data}
 Unstructured data:
-{"#Document ". join(unstructured_data)}
+{"- Document ". join(unstructured_data)}
   """
   return final_data
 
@@ -230,24 +231,13 @@ async def root():
   return {"message": "Hello World"}
 
 class DocumentInput(BaseModel):
-  question: str = Field()
+  question: str = Field(description="question for retrieval chain")
 
 class QueryRequest(BaseModel):
   uuid: str
   question: str
   chat_history: Optional[List[Tuple[str, str]]] = None
 
-"""
-if request.chat_history is None:
-  response = chain.invoke({
-    "question": request.question,
-  })
-else:
-  response = chain.invoke({
-    "question": request.question,
-    "chat_history": request.chat_history,
-  })
-"""
 @app.get("/query/")
 async def query(request: QueryRequest = Depends(), conn = Depends(get_pg_conn)):
   logger.info(f"Received request: {request.json()}")
@@ -263,55 +253,52 @@ async def query(request: QueryRequest = Depends(), conn = Depends(get_pg_conn)):
 
   pdf_store = await embedding_manager.get_embeddings(pdf)
 
-  pdf_prompt = PromptTemplate.from_template(
-    r"""
-      You are an assistant here to inspect uploaded documents and return information based on the
-      given question and context:
-      Question: {question}
-      Context: {context} 
-    """
+  tools = [
+    Tool(
+      args_schema=DocumentInput,
+      name="knowledge_base",
+      description=f"useful for comparing against documents",
+      func=retriever,
+    ),
+    Tool(
+      args_schema=DocumentInput,
+      name="uploaded_document",
+      description=f"useful when you want to answer questions about the current document",
+      func=RetrievalQA.from_chain_type(llm=llm, retriever=pdf_store.embeddings),
+    )
+  ]
+
+  prompt = ChatPromptTemplate.from_messages(
+    [
+      ("system", "You are a helpful assistant"),
+      MessagesPlaceholder("chat_history", optional=True),
+      ("human", "{input}"),
+      MessagesPlaceholder("agent_scratchpad"),
+    ]
+  )
+  agent = create_openai_tools_agent(llm, tools, prompt)
+  agent_executor = AgentExecutor(agent=agent, tools=tools)
+
+  def convert_to_chat_history(pairs):
+    if pairs is None:
+      return []
+    chat_history = []
+    for pair in pairs:
+      human_msg = HumanMessage(content=pair[0])
+      ai_msg = AIMessage(content=pair[1])
+      chat_history.extend([human_msg, ai_msg])
+    return chat_history
+
+  response = await agent_executor.ainvoke(
+    {
+      "input": request.question,
+      "chat_history": convert_to_chat_history(request.chat_history),
+    }
   )
 
-  def get_context(input_obj):
-    question = input_obj["question"]
-    context_docs = pdf_store.embeddings.invoke(question)
-    context = "\n\n".join(doc.page_content for doc in context_docs)
-    return {"question": question, "context": context}
+  logger.info(f"Received request: {response}")
 
-  pdf_chain = (
-    RunnableLambda(get_context)
-    | pdf_prompt
-    | llm
-    | StrOutputParser()
-  )
-
-  comparison_prompt = ChatPromptTemplate.from_template(
-    """
-    You will be given a question and outputs from two different sources.
-    Question: {question}
-    Knowledge Base Source: {base_output}
-    Uploaded Document Source: {doc_output}
-    Compare and contrast the relevant information from both output sources in relation to the question.
-    """
-  )
-
-  final_chain = (
-    RunnableParallel(base_output=chain, doc_output=pdf_chain, question=RunnableLambda(lambda x: x["question"]))
-    | comparison_prompt
-    | llm
-    | StrOutputParser()
-  )
-
-  if request.chat_history is None:
-    chain_input = {"question": request.question}
-  else:
-    chain_input = {"question": request.question, "chat_history": request.chat_history}
-
-  repsonse = await final_chain.ainvoke(chain_input)
-  
-  print(response)
-
-  return {"response": response}
+  return {"response": response["output"]}
 
 @app.post("/upload/")
 async def upload(file: UploadFile = File(...), conn = Depends(get_pg_conn)):
