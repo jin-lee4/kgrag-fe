@@ -6,6 +6,7 @@ from fastapi import HTTPException
 
 from pdf import PDF
 
+# change to async
 def save_file(upload_dir: str, pdf: PDF, pdf_binary_data: bytes) -> str:
   new_filename = f"{pdf.uuid}_{os.path.splitext(pdf.name)[0]}.pdf"
   file_path = os.path.join(upload_dir, new_filename)

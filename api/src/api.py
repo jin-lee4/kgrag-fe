@@ -43,8 +43,10 @@ model_name = os.environ["MODEL_NAME"]
 # remapping for langchain neo4j integration
 os.environ["NEO4J_URL"] = os.environ["NEO4J_URI"]
 
+
 llm = ChatOpenAI(model_name=model_name)
 
+# TODO: make all the neo4j async
 graph = Neo4jGraph()
 
 vector_index = Neo4jVector.from_existing_graph(
@@ -138,67 +140,6 @@ Unstructured data:
 {"- Document ". join(unstructured_data)}
   """
   return final_data
-
-# Condense a chat history and follow-up question into a standalone question
-_template = """Given the following conversation and a follow up question, rephrase the follow up question to be a standalone question,
-in its original language.
-Chat History:
-{chat_history}
-Follow Up Input: {question}
-Standalone question:"""  # noqa: E501
-CONDENSE_QUESTION_PROMPT = PromptTemplate.from_template(_template)
-
-def _format_chat_history(chat_history: List[Tuple[str, str]]) -> List:
-  buffer = []
-  for human, ai in chat_history:
-    buffer.append(HumanMessage(content=human))
-    buffer.append(AIMessage(content=ai))
-  return buffer
-
-_search_query = RunnableBranch(
-  # If input includes chat_history, we condense it with the follow-up question
-  (
-    RunnableLambda(lambda x: bool(x.get("chat_history"))).with_config(
-      run_name="HasChatHistoryCheck"
-    ),  # Condense follow-up question and chat into a standalone_question
-    RunnablePassthrough.assign(
-      chat_history=lambda x: _format_chat_history(x["chat_history"])
-    )
-    | CONDENSE_QUESTION_PROMPT
-    | ChatOpenAI(temperature=0)
-    | StrOutputParser(),
-  ),
-  # Else, we have no chat history, so just pass through the question
-  RunnableLambda(lambda x : x["question"]),
-)
-
-template = """Answer the question based only on the following context:
-{context}
-
-Question: {question}
-Use natural language and be concise.
-Answer:"""
-prompt = ChatPromptTemplate.from_template(template)
-
-chain = (
-  RunnableParallel(
-    {
-      "context": _search_query | retriever,
-      "question": RunnablePassthrough(),
-    }
-  )
-  | prompt
-  | llm
-  | StrOutputParser()
-)
-
-result = chain.invoke(
-  {
-    "question": "When was she born?",
-    "chat_history": [("Which house did Elizabeth I belong to?", "House Of Tudor")],
-  }
-)
-print("result is: " + result)
 
 ###########
 ### API ###

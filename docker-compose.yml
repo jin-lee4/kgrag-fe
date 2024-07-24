@@ -27,8 +27,6 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
-    #ports:
-    #  - 5432:5432
     volumes:
       - $PWD/postgres/data/mount:/var/lib/postgresql/data/
       - $PWD/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -114,9 +112,9 @@ services:
     #        - ./front-end/node_modules/
     #    - action: rebuild
     #      path: ./front-end/package.json
-    #depends_on:
-    #  api:
-    #    condition: service_healthy
+    depends_on:
+      api:
+        condition: service_healthy
     networks:
       - net
     ports:

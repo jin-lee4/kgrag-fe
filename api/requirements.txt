@@ -5,7 +5,6 @@ PyPDF2
 torch==2.0.1
 pydantic
 uvicorn
-boto3
 # missing from the langchain base image?
 langchain 
 langchain-community 
