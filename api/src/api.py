@@ -257,10 +257,10 @@ async def query(request: QueryRequest = Depends(), conn = Depends(get_pg_conn)):
 def extract_text_from_pdf(file_path):
     with open(file_path, 'rb') as image_file:
         content = image_file.read()
-    logging.info("sending file to google vision API for text detection.")
+    logging.info("Sending file to google vision API for text detection.")
     image = vision.Image(content=content)
     response = vision_client.document_text_detection(image=image)
-    texts = response.text_annotations
+    texts = response.full_text_annotations
 
     logging.info(f"Google vision API response: {response}")
 
@@ -276,12 +276,12 @@ def extract_text_from_pdf(file_path):
     return extracted_text
 
 class AnalysisRequest(BaseModel):
-  text: str
-  modes: List[str]
+  text: str = Field(..., description="The text to be analyzed")
+  modes: List[str] = Field(..., description="List of analysis modes to apply")
 
 
 @app.post("/upload/")
-async def upload(file: UploadFile = File(...), conn = Depends(get_pg_conn)):
+async def upload(file: UploadFile = File(...)):
     if file.content_type != "application/pdf":
         raise HTTPException(status_code=400, detail="Invalid file type. Only PDF files are accepted.")
 
@@ -290,23 +290,18 @@ async def upload(file: UploadFile = File(...), conn = Depends(get_pg_conn)):
         raise HTTPException(status_code=400, detail="File size exceeds 10MB limit.")
     
     try:
-        logging.debug("Generating PDF ID")
-        pdf_id = uuid.uuid4()
-        logging.debug(f"PDF ID generated: {pdf_id}")
-
-        pdf = PDF(str(pdf_id), file.filename)  # Ensure pdf_id is converted to string if needed
-        logging.debug(f"PDF object created: {pdf}")
-
-        file_path = await upload_manager.upload(conn, pdf, contents)
-        logging.info(f"File uploaded and saved at {file_path}")
-
-        extracted_text = extract_text_from_pdf(file_path)
-        logging.info(f"Extracted text from {file.filename}")
-
-        return JSONResponse(content={'uuid': str(pdf_id), 'text': extracted_text}, status_code=200)
+        logger.info(f"Received file: {file.filename}")
+        contents = await file.read()
+        text = extract_text_from_pdf(contents)
+        response = {
+            "uuid": str(file.filename),
+            "text": text
+        }
+        logger.info(f"Extracted text: {text}")  # Log extracted text for debugging
+        return JSONResponse(content=response, status_code=200)
     except Exception as e:
-        logging.error(f"Error during file upload: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        logger.error(f"Error processing file: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
     # pdf = PDF(uuid.uuid4(), file.filename)
@@ -316,28 +311,28 @@ async def upload(file: UploadFile = File(...), conn = Depends(get_pg_conn)):
   # return {"uuid": response}
 
 
-@app.post("/analyze/")
-async def analyze_text(request: AnalysisRequest):
-  text= request.text
-  modes = request.modes
+# @app.post("/analyze/")
+# async def analyze_text(request: AnalysisRequest):
+#   text= request.text
+#   modes = request.modes
 
-  prompts = {
-      "Analyze": "Analyze the following text and provide suggestions for improvement. Consider gaps, relevant considerations and implications of the policies.",
-      "Compare": "Compare the following text with industry standards, governmental policies, and other relevant sources.",
-      "Clarify": "Identify ambiguities and inconsistencies in the text.",
-  }
+#   prompts = {
+#       "Analyze": "Analyze the following text and provide suggestions for improvement. Consider gaps, relevant considerations and implications of the policies.",
+#       "Compare": "Compare the following text with industry standards, governmental policies, and other relevant sources.",
+#       "Clarify": "Identify ambiguities and inconsistencies in the text.",
+#   }
 
-  results = []
+#   results = []
 
-  for mode in modes:
-      if mode in prompts:
-          prompt_template = PromptTemplate(template=prompts[mode] + "\n\n{text}", input_variables=["text"])
-          chain = load_qa_chain(llm, prompt_template)
-          response = chain.run({"text": text})
-          suggestions = response.strip()
-          results.append({"mode": mode, "suggestions": suggestions})
+#   for mode in modes:
+#       if mode in prompts:
+#           prompt_template = PromptTemplate(template=prompts[mode] + "\n\n{text}", input_variables=["text"])
+#           chain = load_qa_chain(llm, prompt_template)
+#           response = chain.run({"text": text})
+#           suggestions = response.strip()
+#           results.append({"mode": mode, "suggestions": suggestions})
 
-  return JSONResponse(content={"results": results}, status_code=200)
+#   return JSONResponse(content={"results": results}, status_code=200)
 
 @app.on_event("startup")
 async def on_startup():
