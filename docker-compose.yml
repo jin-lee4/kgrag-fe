@@ -29,7 +29,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - $PWD/postgres/data/mount:/var/lib/postgresql/data/
-      - $PWD/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+      # - $PWD/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - $PWD/postgresql:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} || exit 1"]
       interval: 10s
@@ -63,6 +64,7 @@ services:
       dockerfile: Dockerfile
     volumes:
       - $PWD/api/uploads:/uploads
+      - /run/desktop/mnt/host/c/Users/jjin_/ruleaid/kg-rag/App_Data/credentials.json:/app/credentials/credentials.json:ro
     environment:
       - MODEL_NAME=${MODEL_NAME}
       - NEO4J_URI=${NEO4J_URI}
@@ -78,6 +80,7 @@ services:
       - LANGCHAIN_ENDPOINT=${LANGCHAIN_ENDPOINT}
       - LANGCHAIN_PROJECT=${LANGCHAIN_PROJECT}
       - LANGCHAIN_API_KEY=${LANGCHAIN_API_KEY}
+      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}
     networks:
       - net
     depends_on:
@@ -103,6 +106,9 @@ services:
     build:
       context: ./front-end
       dockerfile: ../front-end.Dockerfile
+    environment:
+    - GOOGLE_APPLICATION_CREDENTIALS=AppData/credentials.json
+    - GOOGLE_CLOUD_BUCKET=policyreader-pdfs
     #x-develop:
     #  watch:
     #    - action: sync

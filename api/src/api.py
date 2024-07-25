@@ -2,8 +2,10 @@ import os
 import json
 import uuid
 import logging
+import io
 
 from typing import Tuple, List, Optional
+from google.cloud import vision
 
 from pydantic import BaseModel, Field
 
@@ -19,6 +21,7 @@ from langchain_core.runnables import (
 from langchain_core.tools import Tool
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.prompts.prompt import PromptTemplate
+from langchain.chains.question_answering import load_qa_chain
 from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.output_parsers import StrOutputParser
@@ -33,6 +36,7 @@ from langchain_openai import OpenAIEmbeddings
 
 from fastapi import FastAPI, Depends, HTTPException, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from database import postgres_db, get_pg_conn
 from upload import UploadManager
@@ -42,6 +46,14 @@ from pdf import PDF, PDFStore
 model_name = os.environ["MODEL_NAME"]
 # remapping for langchain neo4j integration
 os.environ["NEO4J_URL"] = os.environ["NEO4J_URI"]
+
+
+service_account_key = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+print(f"service account key: {service_account_key}")
+
+# Initialize the Google Cloud Vision client
+print("Initializing Google Cloud Vision client...")
+vision_client = vision.ImageAnnotatorClient.from_service_account_json('/app/credentials/credentials.json')
 
 
 llm = ChatOpenAI(model_name=model_name)
@@ -241,19 +253,91 @@ async def query(request: QueryRequest = Depends(), conn = Depends(get_pg_conn)):
 
   return {"response": response["output"]}
 
+# OCR function to extract text from PDF
+def extract_text_from_pdf(file_path):
+    with open(file_path, 'rb') as image_file:
+        content = image_file.read()
+    logging.info("sending file to google vision API for text detection.")
+    image = vision.Image(content=content)
+    response = vision_client.document_text_detection(image=image)
+    texts = response.text_annotations
+
+    logging.info(f"Google vision API response: {response}")
+
+    extracted_text = ""
+    for text in texts:
+        extracted_text += text.description + "\n"
+
+    if response.error.message:
+        raise Exception(
+            '{}\nFor more info on error messages, check: '
+            'https://cloud.google.com/apis/design/errors'.format(response.error.message))
+
+    return extracted_text
+
+class AnalysisRequest(BaseModel):
+  text: str
+  modes: List[str]
+
+
 @app.post("/upload/")
 async def upload(file: UploadFile = File(...), conn = Depends(get_pg_conn)):
-  if file.content_type != "application/pdf":
-    raise HTTPException(status_code=400, detail="Invalid file type. Only PDF files are accepted.")
+    if file.content_type != "application/pdf":
+        raise HTTPException(status_code=400, detail="Invalid file type. Only PDF files are accepted.")
 
-  contents = file.file.read()
-  if len(contents) > 10 * 1024 * 1024:  # 10MB
-    raise HTTPException(status_code=400, detail="File size exceeds 10MB limit.")
+    contents = await file.read()
+    if len(contents) > 10 * 1024 * 1024:  # 10MB
+        raise HTTPException(status_code=400, detail="File size exceeds 10MB limit.")
+    
+    try:
+        logging.debug("Generating PDF ID")
+        pdf_id = uuid.uuid4()
+        logging.debug(f"PDF ID generated: {pdf_id}")
 
-  pdf = PDF(uuid.uuid4(), file.filename)
-  response = await upload_manager.upload(conn, pdf, contents)
+        pdf = PDF(str(pdf_id), file.filename)  # Ensure pdf_id is converted to string if needed
+        logging.debug(f"PDF object created: {pdf}")
 
-  return {"uuid": response}
+        file_path = await upload_manager.upload(conn, pdf, contents)
+        logging.info(f"File uploaded and saved at {file_path}")
+
+        extracted_text = extract_text_from_pdf(file_path)
+        logging.info(f"Extracted text from {file.filename}")
+
+        return JSONResponse(content={'uuid': str(pdf_id), 'text': extracted_text}, status_code=200)
+    except Exception as e:
+        logging.error(f"Error during file upload: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+    # pdf = PDF(uuid.uuid4(), file.filename)
+    # response = await upload_manager.upload(conn, pdf, contents)
+    # extracted_text = extract_text_from_pdf(response)
+    # return JSONResponse(content={'uuid': pdf_uuid, 'text': extracted_text}, status_code=200)
+  # return {"uuid": response}
+
+
+@app.post("/analyze/")
+async def analyze_text(request: AnalysisRequest):
+  text= request.text
+  modes = request.modes
+
+  prompts = {
+      "Analyze": "Analyze the following text and provide suggestions for improvement. Consider gaps, relevant considerations and implications of the policies.",
+      "Compare": "Compare the following text with industry standards, governmental policies, and other relevant sources.",
+      "Clarify": "Identify ambiguities and inconsistencies in the text.",
+  }
+
+  results = []
+
+  for mode in modes:
+      if mode in prompts:
+          prompt_template = PromptTemplate(template=prompts[mode] + "\n\n{text}", input_variables=["text"])
+          chain = load_qa_chain(llm, prompt_template)
+          response = chain.run({"text": text})
+          suggestions = response.strip()
+          results.append({"mode": mode, "suggestions": suggestions})
+
+  return JSONResponse(content={"results": results}, status_code=200)
 
 @app.on_event("startup")
 async def on_startup():

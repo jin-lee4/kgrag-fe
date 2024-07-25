@@ -14,3 +14,4 @@ asyncpg
 lru-dict
 pypdf
 chromadb
+google-cloud-vision
